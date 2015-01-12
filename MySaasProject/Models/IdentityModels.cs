@@ -1,7 +1,7 @@
-﻿using System.Security.Claims;
+﻿using System.Data.Entity;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNet.Identity;
-using Microsoft.AspNet.Identity.EntityFramework;
 using SaasEcom.Core.DataServices;
 using SaasEcom.Core.Models;
 
@@ -29,6 +29,13 @@ namespace MySaasProject.Models
         public static ApplicationDbContext Create()
         {
             return new ApplicationDbContext();
+        }
+
+        protected override void OnModelCreating(DbModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<ApplicationUser>().Map(m => m.MapInheritedProperties());
+
+            base.OnModelCreating(modelBuilder);
         }
     }
 }

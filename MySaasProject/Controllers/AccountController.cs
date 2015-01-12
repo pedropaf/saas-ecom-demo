@@ -122,8 +122,7 @@ namespace MySaasProject.Controllers
                     // await UserManager.SendEmailAsync(user.Id, "Confirm your account", "Please confirm your account by clicking <a href=\"" + callbackUrl + "\">here</a>");
 
                     // Register user to Stripe
-                    user = await UserManager.FindByEmailAsync(model.Email);
-                    user = (ApplicationUser)await SubscriptionsFacade.SubscribeNewUserAsync(user, model.SubscriptionPlan);
+                    await SubscriptionsFacade.SubscribeNewUserAsync(user, model.SubscriptionPlan);
                     await UserManager.UpdateAsync(user);
 
                     return RedirectToAction("Index", "Home");

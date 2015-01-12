@@ -19,8 +19,21 @@ using MySaasProject.Views.SaasEcom.ViewModels;
 namespace MySaasProject.Controllers
 {
     [Authorize]
-    public class SaasEcomController : Controller
+    public class BillingController : Controller
     {
+		private ApplicationUserManager _userManager;
+        public ApplicationUserManager UserManager
+        {
+            get
+            {
+                return _userManager ?? HttpContext.GetOwinContext().GetUserManager<ApplicationUserManager>();
+            }
+            private set
+            {
+                _userManager = value;
+            }
+        }
+
         private SubscriptionsFacade _subscriptionsFacade;
         private SubscriptionsFacade SubscriptionsFacade
         {
@@ -48,23 +61,12 @@ namespace MySaasProject.Controllers
             }
         }
 
-        private AccountDataService<ApplicationDbContext, ApplicationUser> _accountDataService;
-        private AccountDataService<ApplicationDbContext, ApplicationUser> AccountDataService
-        {
-            get
-            {
-                return _accountDataService ??
-                  (_accountDataService = new AccountDataService<ApplicationDbContext, ApplicationUser>
-                      (Request.GetOwinContext().Get<ApplicationDbContext>()));
-            }
-        }
-
         private ICardProvider _cardService;
         private ICardProvider CardService
         {
             get
             {
-                return _cardService ?? (_cardService = new CardProvider(AccountDataService.GetStripeSecretKey(),
+                return _cardService ?? (_cardService = new CardProvider(this.GetStripeSecretKey(),
                     new CardDataService<ApplicationDbContext, ApplicationUser>(HttpContext.GetOwinContext().Get<ApplicationDbContext>())));
             }
         }
@@ -96,7 +98,7 @@ namespace MySaasProject.Controllers
             var model = new ChangeSubscriptionViewModel
             {
                 SubscriptionPlans = await SubscriptionPlansFacade.GetAllAsync(),
-                CurrentSubscription = currentSubscription != null ? currentSubscription.SubscriptionPlan.FriendlyId : string.Empty
+                CurrentSubscription = currentSubscription != null ? currentSubscription.SubscriptionPlan.Id : string.Empty
             };
 
             return View(model);
@@ -118,13 +120,13 @@ namespace MySaasProject.Controllers
                 TempData.Add("flash", new FlashSuccessViewModel("Sorry, there was an error updating your plan, try again or contact support."));
             }
 
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Index");
         }
 
 
         public async Task<ActionResult> CancelSubscription(int id)
         {
-            if (await SubscriptionsFacade.EndSubscriptionAsync(id, await AccountDataService.GetUserAsync(User.Identity.GetUserId())))
+            if (await SubscriptionsFacade.EndSubscriptionAsync(id, await UserManager.FindByIdAsync(User.Identity.GetUserId())))
             {
                 TempData.Add("flash", new FlashSuccessViewModel("Your subscription has been cancelled."));
             }
@@ -133,7 +135,7 @@ namespace MySaasProject.Controllers
                 TempData.Add("flash", new FlashDangerViewModel("Sorry, there was a problem cancelling your subscription."));
             }
 
-            return RedirectToAction("Index", "Home");
+            return RedirectToAction("Index");
         }
 
 
@@ -153,15 +155,15 @@ namespace MySaasProject.Controllers
         {
             if (ModelState.IsValid)
             {
-                var user = await AccountDataService.GetUserAsync(User.Identity.GetUserId());
+                var user = await UserManager.FindByIdAsync(User.Identity.GetUserId());
                 await CardService.AddAsync(user, model.CreditCard);
 
                 TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been saved successfully."));
 
-                return RedirectToAction("Index", "Home");
+                return RedirectToAction("Index");
             }
 
-            ViewBag.PublishableKey = AccountDataService.GetStripePublicKey();
+            ViewBag.PublishableKey = this.GetStripePublishableKey();
 
             return View(model);
         }
@@ -184,7 +186,7 @@ namespace MySaasProject.Controllers
                 return HttpNotFound();
             }
             model.CreditCard.ClearCreditCardDetails();
-            ViewBag.PublishableKey = AccountDataService.GetStripePublicKey();
+            ViewBag.PublishableKey = this.GetStripePublishableKey();
 
             return View(model);
         }
@@ -197,12 +199,12 @@ namespace MySaasProject.Controllers
 
             if (ModelState.IsValid && await CardService.CardBelongToUser(model.CreditCard.Id, userId))
             {
-                var user = await AccountDataService.GetUserAsync(userId);
+                var user = await UserManager.FindByIdAsync(userId);
                 await CardService.UpdateAsync(user, model.CreditCard);
                 TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been updated successfully."));
-                return RedirectToAction("Index", "Home");
+                return RedirectToAction("Index");
             }
-            ViewBag.PublishableKey = AccountDataService.GetStripePublicKey();
+            ViewBag.PublishableKey = this.GetStripePublishableKey();
 
             return View(model);
         }
@@ -211,6 +213,16 @@ namespace MySaasProject.Controllers
         {
             var invoice = await InvoiceDataService.UserInvoiceAsync(User.Identity.GetUserId(), id);
             return View(invoice);
+        }
+		
+        private string GetStripeSecretKey()
+        {
+            return ConfigurationManager.AppSettings["StripeApiSecretKey"];
+        }
+
+		private string GetStripePublishableKey()
+        {
+            return ConfigurationManager.AppSettings["StripePublishableKey"];
         }
     }
 
