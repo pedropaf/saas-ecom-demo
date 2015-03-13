@@ -6,6 +6,8 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
+using Stripe;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNet.Identity;
 using Microsoft.AspNet.Identity.Owin;
 using SaasEcom.Core.DataServices.Storage;
@@ -14,13 +16,25 @@ using SaasEcom.Core.Infrastructure.PaymentProcessor.Interfaces;
 using SaasEcom.Core.Infrastructure.PaymentProcessor.Stripe;
 using SaasEcom.Core.Models;
 using MySaasProject.Models;
-using MySaasProject.Views.SaasEcom.ViewModels;
 
 namespace MySaasProject.Controllers
 {
     [Authorize]
     public class BillingController : Controller
     {
+	    private ApplicationSignInManager _signInManager;
+        public ApplicationSignInManager SignInManager
+        {
+            get
+            {
+                return _signInManager ?? HttpContext.GetOwinContext().Get<ApplicationSignInManager>();
+            }
+            private set
+            {
+                _signInManager = value;
+            }
+        }
+
 		private ApplicationUserManager _userManager;
         public ApplicationUserManager UserManager
         {
@@ -45,7 +59,10 @@ namespace MySaasProject.Controllers
                     new SubscriptionProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"]),
                     new CardProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"],
                         new CardDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>())),
-                    new CustomerProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"])));
+                    new CardDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>()),
+                    new CustomerProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"]),
+                    new SubscriptionPlanDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>()),
+                    new ChargeProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"])));
             }
         }
 
@@ -66,7 +83,7 @@ namespace MySaasProject.Controllers
         {
             get
             {
-                return _cardService ?? (_cardService = new CardProvider(this.GetStripeSecretKey(),
+                return _cardService ?? (_cardService = new CardProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"],
                     new CardDataService<ApplicationDbContext, ApplicationUser>(HttpContext.GetOwinContext().Get<ApplicationDbContext>())));
             }
         }
@@ -110,39 +127,69 @@ namespace MySaasProject.Controllers
         {
             if (ModelState.IsValid)
             {
-                // TODO: Update subscription!!
-                // SubscriptionsFacade.UpdateSubscriptionAsync(User.Identity.GetUserId(), model.CurrentSubscription, model.NewPlan);
+                var user = await UserManager.FindByIdAsync(User.Identity.GetUserId());
+                await SubscriptionsFacade.UpdateSubscriptionAsync(user.Id, user.StripeCustomerId, model.NewPlan);
 
-                TempData.Add("flash", new FlashSuccessViewModel("Your plan has been updated."));
+                // TempData.Add("flash", new FlashSuccessViewModel("Your subscription plan has been updated."));
             }
             else
             {
-                TempData.Add("flash", new FlashSuccessViewModel("Sorry, there was an error updating your plan, try again or contact support."));
+                // TempData.Add("flash", new FlashSuccessViewModel("Sorry, there was an error updating your plan, try again or contact support."));
             }
 
             return RedirectToAction("Index");
         }
 
-
-        public async Task<ActionResult> CancelSubscription(int id)
+        public ActionResult CancelSubscription(int id)
         {
-            if (await SubscriptionsFacade.EndSubscriptionAsync(id, await UserManager.FindByIdAsync(User.Identity.GetUserId())))
+			return View(new CancelSubscriptionViewModel { Id = id });
+        }
+
+		[HttpPost]
+		public async Task<ActionResult> CancelSubscription(CancelSubscriptionViewModel model)
+        {
+            if (ModelState.IsValid)
             {
-                TempData.Add("flash", new FlashSuccessViewModel("Your subscription has been cancelled."));
+                var currentSubscription = (await SubscriptionsFacade.UserActiveSubscriptionsAsync(User.Identity.GetUserId())).FirstOrDefault();
+                var user = await UserManager.FindByIdAsync(User.Identity.GetUserId());
+
+                DateTime? endDate; // Because we are passing CancelAtTheEndOfPeriod to EndSubscription, we get the date when the subscription will be cancelled
+                if (currentSubscription != null &&
+                    (endDate = await SubscriptionsFacade.EndSubscriptionAsync(currentSubscription.Id, user, true, model.Reason)) != null)
+                {
+                    // TempData.Add("flash", new FlashSuccessViewModel("Your subscription has been cancelled."));
+                }
+                else
+                {
+                    // TempData.Add("flash", new FlashDangerViewModel("Sorry, there was a problem cancelling your subscription."));
+                }
+
+                return RedirectToAction("Index", "Billing");
+            }
+
+			return View(model);
+        }
+
+		public async Task<ActionResult> ReActivateSubscription()
+		{
+            var currentSubscription = (await SubscriptionsFacade.UserActiveSubscriptionsAsync(User.Identity.GetUserId())).FirstOrDefault();
+            var user = await UserManager.FindByIdAsync(User.Identity.GetUserId());
+
+            if (currentSubscription != null &&
+                await SubscriptionsFacade.UpdateSubscriptionAsync(user.Id, user.StripeCustomerId, currentSubscription.SubscriptionPlanId))
+            {
+                // TempData.Add("flash", new FlashSuccessViewModel("Your subscription plan has been re-activated."));
             }
             else
             {
-                TempData.Add("flash", new FlashDangerViewModel("Sorry, there was a problem cancelling your subscription."));
+                // TempData.Add("flash", new FlashDangerViewModel("Ooops! There was a problem re-activating your subscription. Please, try again."));
             }
 
             return RedirectToAction("Index");
-        }
-
+		} 
 
         public ActionResult AddCreditCard()
         {
-            ViewBag.PublishableKey = ConfigurationManager.AppSettings["StripeApiPublishableKey"];
-
             return View(new CreditCardViewModel
             {
                 CreditCard = new CreditCard()
@@ -158,12 +205,10 @@ namespace MySaasProject.Controllers
                 var user = await UserManager.FindByIdAsync(User.Identity.GetUserId());
                 await CardService.AddAsync(user, model.CreditCard);
 
-                TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been saved successfully."));
+                // TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been saved successfully."));
 
                 return RedirectToAction("Index");
             }
-
-            ViewBag.PublishableKey = this.GetStripePublishableKey();
 
             return View(model);
         }
@@ -186,7 +231,6 @@ namespace MySaasProject.Controllers
                 return HttpNotFound();
             }
             model.CreditCard.ClearCreditCardDetails();
-            ViewBag.PublishableKey = this.GetStripePublishableKey();
 
             return View(model);
         }
@@ -201,10 +245,35 @@ namespace MySaasProject.Controllers
             {
                 var user = await UserManager.FindByIdAsync(userId);
                 await CardService.UpdateAsync(user, model.CreditCard);
-                TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been updated successfully."));
+                
+                // TempData.Add("flash", new FlashSuccessViewModel("Your credit card has been updated successfully."));
+                
                 return RedirectToAction("Index");
             }
-            ViewBag.PublishableKey = this.GetStripePublishableKey();
+
+            return View(model);
+        }
+
+		public ViewResult BillingAddress()
+        {
+			// TODO: Get Billing address from your model
+			var model = new BillingAddress();
+
+            return View(model);
+        }
+
+        [HttpPost]
+        public ActionResult BillingAddress(BillingAddress model)
+        {
+            if (ModelState.IsValid)
+            {
+                // TODO: Call your service to save the billing address
+
+
+                // TempData.Add("flash", new FlashSuccessViewModel("Your billing address has been saved."));
+
+                return RedirectToAction("Index");
+            }
 
             return View(model);
         }
@@ -214,19 +283,32 @@ namespace MySaasProject.Controllers
             var invoice = await InvoiceDataService.UserInvoiceAsync(User.Identity.GetUserId(), id);
             return View(invoice);
         }
-		
-        private string GetStripeSecretKey()
-        {
-            return ConfigurationManager.AppSettings["StripeApiSecretKey"];
-        }
 
-		private string GetStripePublishableKey()
+		public async Task<ActionResult> DeleteAccount()
         {
-            return ConfigurationManager.AppSettings["StripePublishableKey"];
+            var user = await _userManager.FindByIdAsync(User.Identity.GetUserId());
+            
+            // Delete User
+            await _userManager.DeleteAsync(user);
+            
+            // TODO: Delete user data
+
+            SignInManager.AuthenticationManager.SignOut();
+
+            return RedirectToAction("Index", "Home");
         }
     }
 
     #region ViewModels
+
+	public class CancelSubscriptionViewModel
+    {
+		public int Id { get; set; }
+
+        [Required]
+        [Display(Name = "Reason why you want to cancel")]
+        public string Reason { get; set; }
+    }
 
     public class CreditCardViewModel
     {
@@ -265,6 +347,9 @@ namespace MySaasProject.Controllers
         public string CurrencySymbol { get; set; }
         public string InvoicePeriod { get; set; }
 
+		public int? Tax { get; set; }
+		public decimal? TaxPercent { get; set; }
+
         public ICollection<LineItem> LineItems { get; set; }
 
         public class LineItem
@@ -300,5 +385,91 @@ namespace MySaasProject.Controllers
         }
     }
 
+    #endregion
+
+	#region Stripe to SaasEcom Mapper
+
+	public static class Mapper
+    { 
+        public static Invoice Map(StripeInvoice stripeInvoice)
+        {
+            var invoice = new Invoice
+            {
+                AmountDue = stripeInvoice.AmountDue,
+                ApplicationFee = stripeInvoice.ApplicationFee,
+                AttemptCount = stripeInvoice.AttemptCount,
+                Attempted = stripeInvoice.Attempted,
+                Closed = stripeInvoice.Closed,
+                Currency = stripeInvoice.Currency,
+                Date = stripeInvoice.Date,
+                Description = stripeInvoice.Description,
+                // Discount = Map(stripeInvoice.StripeDiscount),
+                EndingBalance = stripeInvoice.EndingBalance,
+                Forgiven = stripeInvoice.Forgiven,
+                NextPaymentAttempt = stripeInvoice.NextPaymentAttempt,
+                Paid = stripeInvoice.Paid,
+                PeriodStart = stripeInvoice.PeriodStart,
+                PeriodEnd = stripeInvoice.PeriodEnd,
+                ReceiptNumber = stripeInvoice.ReceiptNumber,
+                StartingBalance = stripeInvoice.StartingBalance,
+                StripeCustomerId = stripeInvoice.CustomerId,
+                StatementDescriptor = stripeInvoice.StatementDescriptor,
+                Tax = stripeInvoice.Tax,
+                TaxPercent = stripeInvoice.TaxPercent,
+                StripeId = stripeInvoice.Id,
+                Subtotal = stripeInvoice.Subtotal,
+                Total = stripeInvoice.Total,
+                LineItems = Map(stripeInvoice.StripeInvoiceLineItems.Data)
+            };
+
+            return invoice;
+        }
+
+        private static ICollection<Invoice.LineItem> Map(IEnumerable<StripeInvoiceLineItem> list)
+        {
+            if (list == null)
+                return null;
+
+            return list.Select(i => new Invoice.LineItem
+            {
+                Amount = i.Amount,
+                Currency = i.Currency,
+                Period = Map(i.StripePeriod),
+                Plan = Map(i.Plan),
+                Proration = i.Proration,
+                Quantity = i.Quantity,
+                StripeLineItemId = i.Id,
+                Type = i.Type
+            }).ToList();
+        }
+
+        private static Invoice.Plan Map(StripePlan stripePlan)
+        {
+            return new Invoice.Plan
+            {
+                AmountInCents = stripePlan.Amount,
+                Created = stripePlan.Created,
+                Currency = stripePlan.Currency,
+                StatementDescriptor = stripePlan.StatementDescriptor,
+                Interval = stripePlan.Interval,
+                IntervalCount = stripePlan.IntervalCount,
+                Name = stripePlan.Name,
+                StripePlanId = stripePlan.Id,
+                TrialPeriodDays = stripePlan.TrialPeriodDays
+            };
+        }
+
+        private static Invoice.Period Map(StripePeriod stripePeriod)
+        {
+            if (stripePeriod == null)
+                return null;
+
+            return new Invoice.Period
+            {
+                Start = stripePeriod.Start,
+                End = stripePeriod.End
+            };
+        }
+	}
     #endregion
 }

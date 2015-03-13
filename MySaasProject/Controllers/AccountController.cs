@@ -54,7 +54,10 @@ namespace MySaasProject.Controllers
                     new SubscriptionProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"]),
                     new CardProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"],
                         new CardDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>())),
-                    new CustomerProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"])));
+                    new CardDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>()),
+                    new CustomerProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"]),
+                    new SubscriptionPlanDataService<ApplicationDbContext, ApplicationUser>(Request.GetOwinContext().Get<ApplicationDbContext>()),
+                    new ChargeProvider(ConfigurationManager.AppSettings["StripeApiSecretKey"])));
             }
         }
 
@@ -109,7 +112,7 @@ namespace MySaasProject.Controllers
         {
             if (ModelState.IsValid)
             {
-                var user = new ApplicationUser() { UserName = model.Email, Email = model.Email, CreatedAt = DateTime.UtcNow };
+                var user = new ApplicationUser { UserName = model.Email, Email = model.Email, RegistrationDate = DateTime.UtcNow };
                 IdentityResult result = await UserManager.CreateAsync(user, model.Password);
                 if (result.Succeeded)
                 {
@@ -122,7 +125,7 @@ namespace MySaasProject.Controllers
                     // await UserManager.SendEmailAsync(user.Id, "Confirm your account", "Please confirm your account by clicking <a href=\"" + callbackUrl + "\">here</a>");
 
                     // Register user to Stripe
-                    await SubscriptionsFacade.SubscribeNewUserAsync(user, model.SubscriptionPlan.ToLower());
+                    await SubscriptionsFacade.SubscribeUserAsync(user, model.SubscriptionPlan.ToLower());
                     await UserManager.UpdateAsync(user);
 
                     return RedirectToAction("Index", "Home");

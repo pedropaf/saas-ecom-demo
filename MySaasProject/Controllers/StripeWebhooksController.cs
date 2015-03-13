@@ -3,7 +3,6 @@ using System.Net;
 using System.Threading.Tasks;
 using System.Web;
 using System.Web.Mvc;
-using AutoMapper;
 using Microsoft.AspNet.Identity.Owin;
 using SaasEcom.Core.DataServices.Storage;
 using SaasEcom.Core.Models;
@@ -28,7 +27,6 @@ namespace MySaasProject.Controllers
         public async Task<HttpStatusCodeResult> Index()
         {
             var json = new StreamReader(Request.InputStream).ReadToEnd();
-
             var stripeEvent = StripeEventUtility.ParseEvent(json);
 
             #region All Event types
@@ -50,7 +48,6 @@ namespace MySaasProject.Controllers
                 case "charge.failed": // Occurs whenever a failed charge attempt occurs.
                     break;
                 case "charge.refunded": // Occurs whenever a charge is refunded, including partial refunds.
-                    var stripeCharge = Stripe.Mapper<StripeCharge>.MapFromJson(stripeEvent.Data.Object.ToString());
                     break;
                 case "charge.captured": // Occurs whenever a previously uncaptured charge is captured.
                     break;
@@ -71,6 +68,7 @@ namespace MySaasProject.Controllers
                 case "customer.card.created": // Occurs whenever a new card is created for the customer.
                     break;
                 case "customer.card.updated": // Occurs whenever a card's details are changed.
+                    // TODO: Save card updated, might happen when the card is close to expire
                     break;
                 case "customer.card.deleted": // Occurs whenever a card is removed from a customer.
                     break;
@@ -90,15 +88,22 @@ namespace MySaasProject.Controllers
                 case "customer.discount.deleted":
                     break;
                 case "invoice.created": // Occurs whenever a new invoice is created. If you are using webhooks, Stripe will wait one hour after they have all succeeded to attempt to pay the invoice; the only exception here is on the first invoice, which gets created and paid immediately when you subscribe a customer to a plan. If your webhooks do not all respond successfully, Stripe will continue retrying the webhooks every hour and will not attempt to pay the invoice. After 3 days, Stripe will attempt to pay the invoice regardless of whether or not your webhooks have succeeded. See how to respond to a webhook.
-                case "invoice.payment_succeeded": // Occurs whenever an invoice attempts to be paid, and the payment succeeds.
+                    break;
                 case "invoice.payment_failed": // Occurs whenever an invoice attempts to be paid, and the payment fails. This can occur either due to a declined payment, or because the customer has no active card. A particular case of note is that if a customer with no active card reaches the end of its free trial, an invoice.payment_failed notification will occur.
-                    var stripeInvoice = Stripe.Mapper<StripeInvoice>.MapFromJson(stripeEvent.Data.Object.ToString());
-                    var invoice = Mapper.Map<Invoice>(stripeInvoice);
-                    await InvoiceDataService.CreateOrUpdateAsync(invoice);
-                    // TODO: Send invoice by email
+                    // TODO: Notify customer
+                    break;
+                case "invoice.payment_succeeded": // Occurs whenever an invoice attempts to be paid, and the payment succeeds.
+                    StripeInvoice stripeInvoice = Stripe.Mapper<StripeInvoice>.MapFromJson(stripeEvent.Data.Object.ToString());
+                    Invoice invoice = SaasEcom.Core.Infrastructure.Mappers.Map(stripeInvoice);
+                    if (invoice != null && invoice.Total > 0)
+                    {
+                        await InvoiceDataService.CreateOrUpdateAsync(invoice);
+
+                        // TODO: Send invoice by email
+
+                    }
                     break;
                 case "invoice.updated": // Occurs whenever an invoice changes (for example, the amount could change).
-                    // TODO: Update invoice
                     break;
                 case "invoiceitem.created": // Occurs whenever an invoice item is created.
                     break;
