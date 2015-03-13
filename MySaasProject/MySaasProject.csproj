@@ -185,6 +185,10 @@
     <Compile Include="Migrations\201501120053315_InitialCreate.Designer.cs">
       <DependentUpon>201501120053315_InitialCreate.cs</DependentUpon>
     </Compile>
+    <Compile Include="Migrations\201503130217309_UpdateSaasEcom-1.1.3.cs" />
+    <Compile Include="Migrations\201503130217309_UpdateSaasEcom-1.1.3.Designer.cs">
+      <DependentUpon>201503130217309_UpdateSaasEcom-1.1.3.cs</DependentUpon>
+    </Compile>
     <Compile Include="Migrations\Configuration.cs" />
     <Compile Include="Models\AccountViewModels.cs" />
     <Compile Include="Models\IdentityModels.cs" />
@@ -280,6 +284,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Migrations\201501120053315_InitialCreate.resx">
       <DependentUpon>201501120053315_InitialCreate.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\201503130217309_UpdateSaasEcom-1.1.3.resx">
+      <DependentUpon>201503130217309_UpdateSaasEcom-1.1.3.cs</DependentUpon>
     </EmbeddedResource>
   </ItemGroup>
   <PropertyGroup>
